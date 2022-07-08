@@ -2,6 +2,11 @@
 name = "anime-cli-rs"
 version = "0.1.0"
 edition = "2021"
+authors = ["Erick Vilcia erick.vilcica@protonmail.com"]
+description = "A tool for searching and streaming anime from the cli."
+readme = "README.md"
+repository = "https://github.com/rederick29/anime-cli-rs"
+license = "GPL-3.0-or-later"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

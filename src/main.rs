@@ -111,12 +111,12 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
 
     // Iterate through all the pages, with each page being 5 entries long
     const PAGE_LENGTH: usize = 5;
-    'pages: while page <= total && (page*PAGE_LENGTH <= total || page <= total) {
+    'pages: while page <= total && page*PAGE_LENGTH <= total+PAGE_LENGTH {
         // Print out entries in pages and number entries 1 - PAGE_LENGTH
         for entry in entries.get(page*PAGE_LENGTH - PAGE_LENGTH..page*PAGE_LENGTH)
-        .unwrap()
-        .into_iter()
-        .enumerate() {
+            .unwrap()
+            .iter()
+            .enumerate() {
             println!("{}. {}", (entry.0)+1, entry.1);
         }
 
@@ -141,12 +141,12 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
                 return Ok(entry.clone());
             }
             // q for exiting the program
-            else if user_choice.chars().next().unwrap().to_owned() == 'q' {
+            else if user_choice.chars().next().unwrap() == 'q' {
                 println!("Quitting...");
                 std::process::exit(0);
             }
             // n for next going to the next page
-            else if user_choice.chars().next().unwrap().to_owned() == 'n' {
+            else if user_choice.chars().next().unwrap() == 'n' {
                 page += 1;
                 if page != 1 && page*PAGE_LENGTH > entries.len() {
                     println!("\nGoing back to first page...\n");

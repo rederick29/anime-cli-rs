@@ -1,7 +1,7 @@
 use scraper::{Html, Selector};
 
 // Struct for holding information about an entry on Nyaa.si
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NyaaEntry {
     pub name: String,
     pub magnet: String,
@@ -11,7 +11,7 @@ pub struct NyaaEntry {
 impl std::fmt::Display for NyaaEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{}", self.name))
-            .expect("failed to output NyaaEntry");
+        .expect("failed to output NyaaEntry");
         // TODO: Size, Date, etc
         Ok(())
     }
@@ -26,9 +26,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Gather first page of results for user query into vector
     // If query is left empty, latest uploads will be gathered
     let results = search(&*query).await;
-
-    let choice = user_choose(results);
-
+    
+    // Entry chooser UI
+    let choice = user_choose(results).unwrap();
+    
     Ok(())
 }
 
@@ -42,7 +43,7 @@ async fn search(query: &str) -> Vec<NyaaEntry> {
     let response = reqwest::get(search_url)
         .await
         .expect("failed to get response from URL");
-    
+
     // 200 is HTTP status for OK
     if response.status() != 200 {
         panic!("nyaa server is not OK to be scraped")
@@ -102,10 +103,62 @@ async fn search(query: &str) -> Vec<NyaaEntry> {
 }
 
 // Display list of results and let user pick one
-fn user_choose(entries: Vec<NyaaEntry>) -> NyaaEntry {
-    for entry in entries.into_iter().enumerate() {
-        println!("{}. {}", (entry.0)+1, entry.1);
-    }
+fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
+    // Initialise page as the first page of results
+    let mut page = 1;
+    // Get total no. results
+    let total = entries.len();
 
-    todo!()
+    // Iterate through all the pages, with each page being 5 entries long
+    const PAGE_LENGTH: usize = 5;
+    'pages: while page <= total && (page*PAGE_LENGTH <= total || page <= total) {
+        // Print out entries in pages and number entries 1 - PAGE_LENGTH
+        for entry in entries.get(page*PAGE_LENGTH - PAGE_LENGTH..page*PAGE_LENGTH)
+        .unwrap()
+        .into_iter()
+        .enumerate() {
+            println!("{}. {}", (entry.0)+1, entry.1);
+        }
+
+        // User input loop
+        loop {
+            // use for access to .flush()
+            use std::io::Write;
+            // Print user UI
+            print!("\n(1-{}) (n - next) (q - quit)\nMake a choice: ", PAGE_LENGTH); 
+            std::io::stdout().flush().expect("could not flush stdout");
+            // Get user input
+            let mut user_choice = String::new();
+            std::io::stdin().read_line(&mut user_choice).expect("could not read from stdin");
+            println!();
+            // Parse user input to u8, assume 0 if NaN (invalid choice).
+            let number: u8 = user_choice.trim().parse().unwrap_or(0);
+
+            // Check if number provided is on page
+            if number > 0 && number <= PAGE_LENGTH as u8 {
+                let selected: u8 = (page*PAGE_LENGTH - PAGE_LENGTH) as u8 + number - 1;
+                let entry: &NyaaEntry = entries.get(selected as usize).expect("could not get requested entry");
+                return Ok(entry.clone());
+            }
+            // q for exiting the program
+            else if user_choice.chars().next().unwrap().to_owned() == 'q' {
+                println!("Quitting...");
+                std::process::exit(0);
+            }
+            // n for next going to the next page
+            else if user_choice.chars().next().unwrap().to_owned() == 'n' {
+                page += 1;
+                if page != 1 && page*PAGE_LENGTH > entries.len() {
+                    println!("\nGoing back to first page...\n");
+                    page = 1;
+                }
+                continue 'pages;
+            }
+            else {
+                println!("Invalid choice, try again.");
+                continue;
+            }
+        }
+    }
+    Err("could not choose entry")
 }

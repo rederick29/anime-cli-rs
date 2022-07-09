@@ -1,4 +1,5 @@
 use scraper::{Html, Selector};
+mod bindings;
 
 // Struct for holding information about an entry on Nyaa.si
 #[derive(Debug, Clone)]
@@ -27,9 +28,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // If query is left empty, latest uploads will be gathered
     let results = search(&*query).await;
     
-    // Entry chooser UI
+    // Entry chooser UI, returns user pick
     let choice = user_choose(results).unwrap();
-    
+
+    // Convert magnet URI to CString for use in ffi
+    let link_cstring = std::ffi::CString::new(&choice.magnet[..]).unwrap();
+
+    // Use c++ ffi to download using libtorrent
+    let done: bool;
+    unsafe { done = bindings::download_magnet(link_cstring.as_ptr()); }
+    // When download_magnet() finishes executing, it returns true
+    if done == true {
+        // TODO: Open mpv or vlc with downloaded file if video file
+        //       otherwise unzip, traverse directories
+    }
     Ok(())
 }
 

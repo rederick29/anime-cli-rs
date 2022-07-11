@@ -83,7 +83,8 @@ async fn search(query: &str) -> Vec<NyaaEntry> {
     };
 
     // Initialise variable storing results
-    let mut entries: Vec<NyaaEntry> = vec![];
+    // note: 75 is the amount of results in one nyaa.si page
+    let mut entries: Vec<NyaaEntry> = Vec::with_capacity(75);
 
     // For each result, extract title and link
     for entry in tbody.select(&entry_selector) {
@@ -118,18 +119,51 @@ async fn search(query: &str) -> Vec<NyaaEntry> {
 fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
     // Initialise page as the first page of results
     let mut page = 1;
+
     // Get total no. results
     let total = entries.len();
 
     // Iterate through all the pages, with each page being 5 entries long
     const PAGE_LENGTH: usize = 5;
+
+    dbg!(&PAGE_LENGTH);
     'pages: while page <= total && page*PAGE_LENGTH <= total+PAGE_LENGTH {
         // Print out entries in pages and number entries 1 - PAGE_LENGTH
-        for entry in entries.get(page*PAGE_LENGTH - PAGE_LENGTH..page*PAGE_LENGTH)
-            .unwrap()
-            .iter()
-            .enumerate() {
-            println!("{}. {}", (entry.0)+1, entry.1);
+        let index = page*PAGE_LENGTH - PAGE_LENGTH..page*PAGE_LENGTH;
+        // let last_in_page = index.clone().last().unwrap() + 1;
+
+        let last_in_page = {
+            let mut tmp = 0;
+            for i in 0..PAGE_LENGTH {
+                match entries.get(page*i) {
+                    Some(_) => tmp += 1,
+                    None => break,
+                }
+            }
+            tmp
+        };
+
+        dbg!(&index);
+        dbg!(&last_in_page);
+        dbg!(&page);
+
+        // Check if index is out of bounds and change behaviour if it is
+        if PAGE_LENGTH > last_in_page {
+            // If not enough items to fill one page on the current page, then print up to the end of the vector
+            for entry in entries.get(page*PAGE_LENGTH - PAGE_LENGTH..total) 
+                .unwrap()
+                .iter()
+                .enumerate() {
+                println!("{}. {}", (entry.0)+1, entry.1);
+            }
+        } else {
+            // Normal behaviour for when there are PAGE_LENGTH items available at current page
+            for entry in entries.get(index.clone())
+                .unwrap()
+                .iter()
+                .enumerate() {
+                println!("{}. {}", (entry.0)+1, entry.1);
+            }  
         }
 
         // User input loop
@@ -147,7 +181,7 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
             let number: u8 = user_choice.trim().parse().unwrap_or(0);
 
             // Check if number provided is on page
-            if number > 0 && number <= PAGE_LENGTH as u8 {
+            if number > 0 && number <= PAGE_LENGTH as u8 && number <= last_in_page as u8 {
                 let selected: u8 = (page*PAGE_LENGTH - PAGE_LENGTH) as u8 + number - 1;
                 let entry: &NyaaEntry = entries.get(selected as usize).expect("could not get requested entry");
                 return Ok(entry.clone());
@@ -159,11 +193,12 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
             }
             // n for next going to the next page
             else if user_choice.chars().next().unwrap() == 'n' {
-                page += 1;
-                if page != 1 && page*PAGE_LENGTH > entries.len() {
+                if page*PAGE_LENGTH == entries.len() || PAGE_LENGTH > last_in_page {
                     println!("\nGoing back to first page...\n");
                     page = 1;
+                    continue 'pages;
                 }
+                page += 1;
                 continue 'pages;
             }
             else {

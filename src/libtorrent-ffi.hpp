@@ -8,5 +8,5 @@
 #include "libtorrent/torrent_info.hpp"
 #include "libtorrent/torrent_status.hpp"
 
-// Download given magnet link, returning true when done
-bool download_magnet(const char* magnet, const char* file_path);
+// Download given magnet link, returning path to first file downloaded
+char* download_magnet(const char* magnet);

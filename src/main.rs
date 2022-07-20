@@ -35,10 +35,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let link_cstring = std::ffi::CString::new(&choice.magnet[..]).unwrap();
 
     // Use c++ ffi to download using libtorrent
-    let done: bool;
-    unsafe { done = bindings::download_magnet(link_cstring.as_ptr()); }
-    dbg!(done);
-    
+    let output_ptr = unsafe { bindings::download_magnet(link_cstring.as_ptr()) };
+    let output_path = unsafe { std::ffi::CStr::from_ptr(output_ptr) };
+    dbg!(output_path.to_str().unwrap());
+
     Ok(())
 }
 
@@ -123,7 +123,6 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
     // Iterate through all the pages, with each page being 5 entries long
     const PAGE_LENGTH: usize = 5;
 
-    dbg!(&PAGE_LENGTH);
     'pages: while page <= total && page*PAGE_LENGTH <= total+PAGE_LENGTH {
         // Print out entries in pages and number entries 1 - PAGE_LENGTH
         let index = page*PAGE_LENGTH - PAGE_LENGTH..page*PAGE_LENGTH;
@@ -139,10 +138,6 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
             }
             tmp
         };
-
-        dbg!(&index);
-        dbg!(&last_in_page);
-        dbg!(&page);
 
         // Check if index is out of bounds and change behaviour if it is
         if PAGE_LENGTH > last_in_page {

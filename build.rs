@@ -16,6 +16,7 @@ fn main() {
     let bindings = bindgen::Builder::default()
         .header("src/libtorrent-ffi.hpp")
         .allowlist_function("download_magnet()")
+        .opaque_type("std::.*")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .generate()
         .expect("could not generate bindings");

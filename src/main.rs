@@ -37,11 +37,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Use c++ ffi to download using libtorrent
     let done: bool;
     unsafe { done = bindings::download_magnet(link_cstring.as_ptr()); }
-    // When download_magnet() finishes executing, it returns true
-    if done == true {
-        // TODO: Open mpv or vlc with downloaded file if video file
-        //       otherwise unzip, traverse directories
-    }
+    dbg!(done);
+    
     Ok(())
 }
 

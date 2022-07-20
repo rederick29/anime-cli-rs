@@ -8,11 +8,5 @@
 #include "libtorrent/torrent_info.hpp"
 #include "libtorrent/torrent_status.hpp"
 
-/**
- * @brief Download given magnet link, returning when done.
- * 
- * @param magnet - magnet link to be parsed
- * @return true  - Finished downloading successfully
- * @return false - Error
- */
-bool download_magnet(char const* magnet);
+// Download given magnet link, returning true when done
+bool download_magnet(const char* magnet, const char* file_path);

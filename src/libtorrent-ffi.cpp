@@ -42,7 +42,7 @@ char* download_magnet(const char* magnet) {
             std::cout << "Saving file " << i+1 << " to " << file_path << std::endl;
         }
 
-        // Save path of first file - TODO: Don't just pick the first file  
+        // Save path of first file - TODO: Don't just pick the first file
         std::string file_path = t_status.save_path + t_files.file_path(0);
 
         // Until it finishes downloading, poll status and write out percentage every 2s
@@ -61,7 +61,7 @@ char* download_magnet(const char* magnet) {
         // Make new file path string to return to rust
         char* output_path = (char*) malloc(file_path.length()+1);
         std::strncpy(output_path, file_path.c_str(), file_path.length()+1);
-        std::cout << "[src/libtorrent-ffi.cpp:62] output_path = " << output_path << std::endl; //debug 
+        // std::cout << "[src/libtorrent-ffi.cpp:62] output_path = " << output_path << std::endl; //debug
         if (output_path == nullptr) {
             throw std::runtime_error("c++ output_path is nullptr");
         } else {

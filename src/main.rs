@@ -23,11 +23,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Enter a title:");
     let mut query = String::new();
     std::io::stdin().read_line(&mut query).expect("could not read from stdin");
-    
+
     // Gather first page of results for user query into vector
     // If query is left empty, latest uploads will be gathered
     let results = search(&*query).await;
-    
+
     // Entry chooser UI, returns user pick
     let choice = user_choose(results).unwrap();
 
@@ -37,7 +37,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Use c++ ffi to download using libtorrent
     let output_ptr = unsafe { bindings::download_magnet(link_cstring.as_ptr()) };
     let output_path = unsafe { std::ffi::CStr::from_ptr(output_ptr) };
-    dbg!(output_path.to_str().unwrap());
+    let output_path = output_path.to_str().expect("failed to make str from cstr");
+
+    // Open mpv TODO: Actually check if it is a video instead of checking file ext
+    if output_path.ends_with(".mkv") {
+        std::process::Command::new("mpv")
+            .arg(output_path)
+            .output()
+            .expect("failed to open mpv");
+    }
+    else {
+        println!("The file is not mkv. Aborting...");
+    }
 
     Ok(())
 }
@@ -56,19 +67,19 @@ async fn search(query: &str) -> Vec<NyaaEntry> {
     // 200 is HTTP status for OK
     if response.status() != 200 {
         panic!("nyaa server is not OK to be scraped")
-    } 
+    }
 
     let page = Html::parse_document(&*response
         .text()
         .await
         .expect("failed to decode response to UTF-8"));
-    
+
     // Setup CSS selectors for matching titles and magnet links of entries
     let table_selector = Selector::parse("tbody").unwrap();
     let title_selector = Selector::parse(r#"a[title]:last-child"#).unwrap();
     let entry_selector = Selector::parse("tr").unwrap();
     let link_selector = Selector::parse(r#"a[href*="magnet:?"]"#).unwrap();
-    
+
     // Select table of results, if no table is present,
     // it means that there are 0 results or other error
     let tbody = match page.select(&table_selector).next() {
@@ -142,7 +153,7 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
         // Check if index is out of bounds and change behaviour if it is
         if PAGE_LENGTH > last_in_page {
             // If not enough items to fill one page on the current page, then print up to the end of the vector
-            for entry in entries.get(page*PAGE_LENGTH - PAGE_LENGTH..total) 
+            for entry in entries.get(page*PAGE_LENGTH - PAGE_LENGTH..total)
                 .unwrap()
                 .iter()
                 .enumerate() {
@@ -155,7 +166,7 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
                 .iter()
                 .enumerate() {
                 println!("{}. {}", (entry.0)+1, entry.1);
-            }  
+            }
         }
 
         // User input loop
@@ -163,7 +174,7 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
             // use for access to .flush()
             use std::io::Write;
             // Print user UI
-            print!("\n(1-{}) (n - next) (q - quit)\nMake a choice: ", PAGE_LENGTH); 
+            print!("\n(1-{}) (n - next) (q - quit)\nMake a choice: ", PAGE_LENGTH);
             std::io::stdout().flush().expect("could not flush stdout");
             // Get user input
             let mut user_choice = String::new();

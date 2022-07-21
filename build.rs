@@ -1,6 +1,8 @@
 fn main() {
-    // Tell Cargo that if the given file changes, to rerun this build script.
-    println!("cargo:rerun-if-changed=src/libtorrent.h");
+    // do not run the build script if only rust code changes
+    println!("cargo:rerun-if-changed=src/libtorrent-ffi.cpp");
+    println!("cargo:rerun-if-changed=src/libtorrent-ffi.hpp");
+    println!("cargo:rerun-if-changed=build.rs");
     // Link libtorrent-rasterbar.
     println!("cargo:rustc-link-lib=torrent-rasterbar");
     // Use lld for linking, ld might not always work.
@@ -11,7 +13,7 @@ fn main() {
         .file("src/libtorrent-ffi.cpp")
         .cpp(true)
         .compile("torrent-ffi");
-    
+
     // Generate C++ FFI bindings for Rust
     let bindings = bindgen::Builder::default()
         .header("src/libtorrent-ffi.hpp")
@@ -20,7 +22,7 @@ fn main() {
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .generate()
         .expect("could not generate bindings");
-    
+
     // Output bindings.rs to src folder
     let out_path = std::path::PathBuf::from("src");
     bindings

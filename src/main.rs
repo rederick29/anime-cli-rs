@@ -41,6 +41,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Open mpv TODO: Actually check if it is a video instead of checking file ext
     if output_path.ends_with(".mkv") {
+        // TODO: Allow user to choose video player instead of mpv
+        println!("Opening mpv...");
         std::process::Command::new("mpv")
             .arg(output_path)
             .output()
@@ -135,14 +137,16 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
     const PAGE_LENGTH: usize = 5;
 
     'pages: while page <= total && page*PAGE_LENGTH <= total+PAGE_LENGTH {
-        // Print out entries in pages and number entries 1 - PAGE_LENGTH
-        let index = page*PAGE_LENGTH - PAGE_LENGTH..page*PAGE_LENGTH;
-        // let last_in_page = index.clone().last().unwrap() + 1;
+        // Clear terminal
+        print!("\x1B[2J\x1B[1;1H");
+        println!("");
 
+        let index = page*PAGE_LENGTH - PAGE_LENGTH..page*PAGE_LENGTH;
+        // Calculate last element on the current page
         let last_in_page = {
             let mut tmp = 0;
             for i in 0..PAGE_LENGTH {
-                match entries.get(page*i) {
+                match entries.get(page*PAGE_LENGTH-PAGE_LENGTH+i) {
                     Some(_) => tmp += 1,
                     None => break,
                 }
@@ -174,7 +178,7 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
             // use for access to .flush()
             use std::io::Write;
             // Print user UI
-            print!("\n(1-{}) (n - next) (q - quit)\nMake a choice: ", PAGE_LENGTH);
+            print!("\n(Page: {}) (1-{}) (n - next) (q - quit)\nMake a choice: ", page, PAGE_LENGTH);
             std::io::stdout().flush().expect("could not flush stdout");
             // Get user input
             let mut user_choice = String::new();
@@ -197,7 +201,6 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
             // n for next going to the next page
             else if user_choice.chars().next().unwrap() == 'n' {
                 if page*PAGE_LENGTH == entries.len() || PAGE_LENGTH > last_in_page {
-                    println!("\nGoing back to first page...\n");
                     page = 1;
                     continue 'pages;
                 }

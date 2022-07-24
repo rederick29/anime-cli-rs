@@ -63,6 +63,7 @@ impl std::fmt::Display for NyaaEntry {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Prepare variables
     let search_query = get_search_string();
     let player_path = get_player_path();
     let nyaa_filter = get_nyaa_filter();
@@ -74,7 +75,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Entry chooser UI, returns user pick
     let choice = user_choose(results).unwrap();
 
-    let output_path = download_entry(choice);
+    // Download chosen entry and return file path of download
+    let output_path = unsafe { download_entry(choice) };
 
     open_video_player(output_path, player_path)
         .expect("could not play video");
@@ -283,14 +285,14 @@ fn get_nyaa_filter() -> NyaaFilter {
     nyaa_filter
 }
 
-fn download_entry(entry: NyaaEntry) -> PathBuf {
+unsafe fn download_entry(entry: NyaaEntry) -> PathBuf {
     // Convert magnet URI to CString for use in ffi
     let link_cstring = std::ffi::CString::new(&entry.magnet[..])
         .expect("could not make cstring from magnet link");
 
     // Use c++ ffi to download using libtorrent
-    let output_ptr = unsafe { bindings::download_magnet(link_cstring.as_ptr()) };
-    let output_path = unsafe { std::ffi::CStr::from_ptr(output_ptr) };
+    let output_ptr = bindings::download_magnet(link_cstring.as_ptr()); // unsafe
+    let output_path = std::ffi::CStr::from_ptr(output_ptr); // unsafe
     let output_path = output_path.to_str()
         .expect("failed to make str from cstr");
     let output_path = PathBuf::from(output_path);

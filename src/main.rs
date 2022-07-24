@@ -1,5 +1,48 @@
-use scraper::{Html, Selector};
 mod bindings;
+use clap::Parser;
+use scraper::{Html, Selector};
+use std::path::PathBuf;
+
+// CLI options
+#[derive(Debug, Parser)]
+#[clap(about, version)]
+struct Args {
+    /// Search string to pass to nyaa.si
+    #[clap(short='q', long, value_name = "title")]
+    query: Option<String>,
+
+    /// Video player executable, either on PATH or absolute path. mpv by default.
+    #[clap(short='p', long, value_name = "video player")]
+    player: Option<PathBuf>,
+
+    /// Username of user to filter results by. None by default
+    #[clap(short='u', long, value_name = "uploader")]
+    user: Option<String>,
+
+    /// Nyaa.si filter to use when searching. no-filter by default.
+    #[clap(value_enum)]
+    filter: Option<NyaaFilter>,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum NyaaFilter {
+    NoFilter,
+    NoRemakes,
+    TrustedOnly,
+}
+
+impl std::fmt::Display for NyaaFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let filter = match self {
+            NyaaFilter::NoFilter => 0,
+            NyaaFilter::NoRemakes => 1,
+            NyaaFilter::TrustedOnly => 2,
+        };
+        f.write_fmt(format_args!("{}", filter))
+            .expect("failed to write NyaaFilter value");
+        Ok(())
+    }
+}
 
 // Struct for holding information about an entry on Nyaa.si
 #[derive(Debug, Clone)]
@@ -12,7 +55,7 @@ pub struct NyaaEntry {
 impl std::fmt::Display for NyaaEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{}", self.name))
-        .expect("failed to output NyaaEntry");
+            .expect("failed to output NyaaEntry");
         // TODO: Size, Date, etc
         Ok(())
     }
@@ -20,46 +63,34 @@ impl std::fmt::Display for NyaaEntry {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Enter a title:");
-    let mut query = String::new();
-    std::io::stdin().read_line(&mut query).expect("could not read from stdin");
+    let search_query = get_search_string();
+    let player_path = get_player_path();
+    let nyaa_filter = get_nyaa_filter();
 
     // Gather first page of results for user query into vector
     // If query is left empty, latest uploads will be gathered
-    let results = search(&*query).await;
+    let results = search(search_query, nyaa_filter, Args::parse().user).await;
 
     // Entry chooser UI, returns user pick
     let choice = user_choose(results).unwrap();
 
-    // Convert magnet URI to CString for use in ffi
-    let link_cstring = std::ffi::CString::new(&choice.magnet[..]).unwrap();
+    let output_path = download_entry(choice);
 
-    // Use c++ ffi to download using libtorrent
-    let output_ptr = unsafe { bindings::download_magnet(link_cstring.as_ptr()) };
-    let output_path = unsafe { std::ffi::CStr::from_ptr(output_ptr) };
-    let output_path = output_path.to_str().expect("failed to make str from cstr");
-
-    // Open mpv TODO: Actually check if it is a video instead of checking file ext
-    if output_path.ends_with(".mkv") {
-        // TODO: Allow user to choose video player instead of mpv
-        println!("Opening mpv...");
-        std::process::Command::new("mpv")
-            .arg(output_path)
-            .output()
-            .expect("failed to open mpv");
-    }
-    else {
-        println!("The file is not mkv. Aborting...");
-    }
+    open_video_player(output_path, player_path)
+        .expect("could not play video");
 
     Ok(())
 }
 
 // Scrapes nyaa.si website for search results and collects them.
-async fn search(query: &str) -> Vec<NyaaEntry> {
-    // URL used for searching, applied filters:
+async fn search(query: String, filter: NyaaFilter, user: Option<String>) -> Vec<NyaaEntry> {
+    // URL used for searching, default applied filters:
     // - Anime - English-translated
-    let search_url = format!("https://nyaa.si/?q={}&f=0&c=1_2", query);
+    let search_url;
+    match user {
+        Some(user) => { search_url = format!("https://nyaa.si/user/{}?f={}&c=1_0&q={}", user, filter, query); }
+        None => { search_url = format!("https://nyaa.si/?q={}&f={}&c=1_2", query, filter); }
+    }
 
     // Attempt to request html page
     let response = reqwest::get(search_url)
@@ -214,4 +245,69 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
         }
     }
     Err("could not choose entry")
+}
+
+fn get_search_string() -> String {
+    // Prompt user for search string if not provided as cli option
+    let mut search_query = String::new();
+    match Args::parse().query {
+        Some(query) => { search_query = query; }
+        None => {
+            println!("Enter a title:");
+            std::io::stdin().read_line(&mut search_query)
+                .expect("could not read from stdin");
+        }
+    }
+    // Replace spaces in string with '+'
+    let search_query = search_query.replace(" ", "+");
+
+    search_query
+}
+
+fn get_player_path() -> PathBuf {
+    // Default player to mpv if not provided as cli option
+    match Args::parse().player {
+        Some(player) =>  PathBuf::from(player),
+        None => PathBuf::from("mpv")
+    }
+}
+
+fn get_nyaa_filter() -> NyaaFilter {
+    // Default to no filter if not specified
+    let nyaa_filter;
+    match Args::parse().filter {
+        Some(filter) => { nyaa_filter = filter; }
+        None => { nyaa_filter = NyaaFilter::NoFilter; }
+    }
+
+    nyaa_filter
+}
+
+fn download_entry(entry: NyaaEntry) -> PathBuf {
+    // Convert magnet URI to CString for use in ffi
+    let link_cstring = std::ffi::CString::new(&entry.magnet[..])
+        .expect("could not make cstring from magnet link");
+
+    // Use c++ ffi to download using libtorrent
+    let output_ptr = unsafe { bindings::download_magnet(link_cstring.as_ptr()) };
+    let output_path = unsafe { std::ffi::CStr::from_ptr(output_ptr) };
+    let output_path = output_path.to_str()
+        .expect("failed to make str from cstr");
+    let output_path = PathBuf::from(output_path);
+
+    output_path
+}
+
+fn open_video_player(file_path: PathBuf, player_path: PathBuf) -> Result<(), &'static str> {
+    // Open video player TODO: Actually check if it is a video instead of checking file ext
+    if file_path.extension().expect("downloaded file has no extension") == "mkv" {
+        println!("\nOpening {}...", &player_path.to_str().expect("could not get str from player_path"));
+        std::process::Command::new(player_path)
+            .arg(file_path)
+            .spawn()
+            .expect("failed to open video player");
+        Ok(())
+    } else {
+        Err("file extension is not mkv. Aborting...")
+    }
 }

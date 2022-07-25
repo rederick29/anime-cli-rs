@@ -47,9 +47,13 @@ impl std::fmt::Display for NyaaFilter {
 // Struct for holding information about an entry on Nyaa.si
 #[derive(Debug, Clone)]
 pub struct NyaaEntry {
-    pub name: String,
-    pub magnet: String,
-    // TODO: Size, Date, Seeders, Leechers, Completed
+    pub name: String, // Title
+    pub magnet: String, // Magnet link
+    pub size: u64, // Size in bytes
+    pub date: u64, // Unix date and time
+    pub seeders: u32, // No. seeders at time of scraping
+    pub leechers: u32, // No. leechers at time of scraping
+    pub completed: u32, // No. completed downloads at time of scraping
 }
 
 impl std::fmt::Display for NyaaEntry {
@@ -104,16 +108,22 @@ async fn search(query: String, filter: NyaaFilter, user: Option<String>) -> Vec<
         panic!("nyaa server is not OK to be scraped")
     }
 
-    let page = Html::parse_document(&*response
+    let page = Html::parse_document(&response
         .text()
         .await
         .expect("failed to decode response to UTF-8"));
 
     // Setup CSS selectors for matching titles and magnet links of entries
     let table_selector = Selector::parse("tbody").unwrap();
-    let title_selector = Selector::parse(r#"a[title]:last-child"#).unwrap();
     let entry_selector = Selector::parse("tr").unwrap();
-    let link_selector = Selector::parse(r#"a[href*="magnet:?"]"#).unwrap();
+    let title_selector = Selector::parse(r#"a[title]:last-child"#).unwrap();
+    let other_selectors: [Selector; 6] = [
+        Selector::parse(r#"a[href*="magnet:?"]"#).unwrap(),
+        Selector::parse(r#"td.text-center:nth-child(4)"#).unwrap(),
+        Selector::parse("[data-timestamp]").unwrap(),
+        Selector::parse(r#"td.text-center:nth-child(6)"#).unwrap(),
+        Selector::parse(r#"td.text-center:nth-child(7)"#).unwrap(),
+        Selector::parse(r#"td.text-center:nth-child(8)"#).unwrap() ];
 
     // Select table of results, if no table is present,
     // it means that there are 0 results or other error
@@ -129,33 +139,67 @@ async fn search(query: String, filter: NyaaFilter, user: Option<String>) -> Vec<
     // note: 75 is the amount of results in one nyaa.si page
     let mut entries: Vec<NyaaEntry> = Vec::with_capacity(75);
 
-    // For each result, extract title and link
+    // For each result, extract info
     for entry in tbody.select(&entry_selector) {
+        // Get ElementRef for title, link, size, etc
+        let mut elements: Vec<scraper::ElementRef> = Vec::with_capacity(6);
+        for selector in &other_selectors {
+            elements.push(entry.select(selector).next().expect("could not select"));
+        }
+
         let title = entry
-            .select(&title_selector)
-            .nth(1)
+            .select(&title_selector).nth(1)
             .expect("could not find title in entry")
-            .text()
-            .next()
+            .text().next()
             .expect("could not find text node in title");
 
-        let link = entry
-            .select(&link_selector)
-            .next()
-            .expect("could not find magnet link in entry")
-            .value()
-            .attr("href")
+        let link = elements[0]
+            .value().attr("href")
             .expect("could not find href attribute of magnet link");
+
+        let size = elements[1]
+            .text().next()
+            .expect("could not find text in size")
+            .parse::<bytesize::ByteSize>()
+            .expect("could not parse size from human-readable size").0;
+
+        let date = elements[2]
+            .value().attr("data-timestamp")
+            .expect("could not find data-timestamp attribute of date")
+            .parse::<u64>()
+            .expect("could not parse u64 datetime from timestamp");
+
+        let seeders = elements[3]
+            .text().next()
+            .expect("could not find text in seeders")
+            .parse::<u32>()
+            .expect("could not parse u32 from seeders");
+
+        let leechers = elements[4]
+            .text().next()
+            .expect("could not find text in leechers")
+            .parse::<u32>()
+            .expect("could not parse u32 from leechers");
+
+        let completed = elements[5]
+            .text().next()
+            .expect("could not find text in completed")
+            .parse::<u32>()
+            .expect("could not parse u32 from completed");
 
         let structured = NyaaEntry {
             name: title.to_owned(),
-            magnet: link.to_owned()
+            magnet: link.to_owned(),
+            size,
+            date,
+            seeders,
+            leechers,
+            completed
         };
-
         entries.push(structured);
     }
-    entries
 
+    entries
 }
 
 // Display list of results and let user pick one
@@ -194,7 +238,9 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
                 .unwrap()
                 .iter()
                 .enumerate() {
-                println!("{}. {}", (entry.0)+1, entry.1);
+                println!("{}. {} => seeders:{} size:{}",
+                         (entry.0)+1, entry.1.name, entry.1.seeders,
+                         bytesize::ByteSize(entry.1.size).to_string_as(false));
             }
         } else {
             // Normal behaviour for when there are PAGE_LENGTH items available at current page
@@ -202,7 +248,9 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
                 .unwrap()
                 .iter()
                 .enumerate() {
-                println!("{}. {}", (entry.0)+1, entry.1);
+                println!("{}. {} => seeders: {} size: {}",
+                         (entry.0)+1, entry.1.name, entry.1.seeders,
+                         bytesize::ByteSize(entry.1.size).to_string_as(false));
             }
         }
 
@@ -221,7 +269,7 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
             let number: u8 = user_choice.trim().parse().unwrap_or(0);
 
             // Check if number provided is on page
-            if number > 0 && number <= PAGE_LENGTH as u8 && number <= last_in_page as u8 {
+            if number > 0 && number <= last_in_page as u8 {
                 let selected: u8 = (page*PAGE_LENGTH - PAGE_LENGTH) as u8 + number - 1;
                 let entry: &NyaaEntry = entries.get(selected as usize).expect("could not get requested entry");
                 return Ok(entry.clone());

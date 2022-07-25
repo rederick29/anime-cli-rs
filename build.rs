@@ -4,7 +4,9 @@ fn main() {
     println!("cargo:rerun-if-changed=src/libtorrent-ffi.hpp");
     println!("cargo:rerun-if-changed=build.rs");
     // Link libtorrent-rasterbar.
-    println!("cargo:rustc-link-lib=torrent-rasterbar");
+    // search a directory "libs/" as alternative to being system installed
+    println!("cargo:rustc-link-search=libs/");
+    println!("cargo:rustc-link-lib=dylib=torrent-rasterbar");
     // Use lld for linking, ld might not always work.
     println!("cargo:rustc-link-arg=-fuse-ld=lld");
 

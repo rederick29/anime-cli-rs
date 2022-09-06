@@ -12,24 +12,9 @@ fn main() {
 
     // Compile libtorrent-ffi
     cc::Build::new()
-        .file("src/libtorrent-ffi.cpp")
         .cpp(true)
+        .file("src/libtorrent-ffi.cpp")
         .compile("torrent-ffi");
-
-    // Generate C++ FFI bindings for Rust
-    let bindings = bindgen::Builder::default()
-        .header("src/libtorrent-ffi.hpp")
-        .allowlist_function("download_magnet()")
-        .opaque_type("std::.*")
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
-        .generate()
-        .expect("could not generate bindings");
-
-    // Output bindings.rs to src folder
-    let out_path = std::path::PathBuf::from("src");
-    bindings
-        .write_to_file(out_path.join("bindings.rs"))
-        .expect("could not write bindings");
 
     // Link libtorrent-ffi statically
     println!("cargo:rustc-link-lib=static=torrent-ffi");

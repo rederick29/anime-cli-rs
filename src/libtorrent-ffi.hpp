@@ -11,4 +11,8 @@
 #include "libtorrent/torrent_flags.hpp"
 
 // Download given magnet link, returning path to first file downloaded
-char* download_magnet(const char* magnet);
+extern "C" void download_magnet(const char* magnet, const char* save_path);
+
+lt::session setup_client();
+void print_status(lt::torrent_handle handle);
+

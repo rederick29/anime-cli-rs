@@ -120,6 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         download_entry(choice, save_path);
     }
 
+    std::thread::sleep(std::time::Duration::from_secs(2));
     open_video_player(file_path, player_path).expect("could not play video");
 
     Ok(())

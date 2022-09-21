@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-
+#include <utility>
 
 lt::session setup_client() {
     // Start new libtorrent session
@@ -19,6 +19,13 @@ lt::session setup_client() {
     settings.set_bool(lt::settings_pack::enable_incoming_utp, false);
     settings.set_int(lt::settings_pack::enc_policy(), 0); // unsure if actually works
     settings.set_int(lt::settings_pack::enc_level(), 3);  // unsure if actually works
+
+    std::string listen_ports = "0.0.0.0:6881,[::]:6881,0.0.0.0:6891,[::]:6891";
+    settings.set_str(lt::settings_pack::listen_interfaces, listen_ports);
+
+    std::string dht_nodes = "router.utorrent.com:6881,dht.transmissionbt.com:6881,dht.libtorrent.org:25401";
+    settings.set_str(lt::settings_pack::dht_bootstrap_nodes, dht_nodes);
+
     session.apply_settings(settings);
 
     return session;

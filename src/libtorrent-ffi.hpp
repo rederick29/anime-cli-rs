@@ -1,18 +1,11 @@
-#ifndef LIBTORRENT_FFI_H
-#define LIBTORRENT_FFI_H
-#endif
-#include "libtorrent/session.hpp"
-#include "libtorrent/add_torrent_params.hpp"
-#include "libtorrent/torrent_handle.hpp"
-#include "libtorrent/magnet_uri.hpp"
-#include "libtorrent/torrent_info.hpp"
-#include "libtorrent/torrent_status.hpp"
-#include "libtorrent/settings_pack.hpp"
-#include "libtorrent/torrent_flags.hpp"
+#pragma once
+#include "ffi-data.hpp"
+#include "BittorrentClient.hpp"
 
-// Download given magnet link, returning path to first file downloaded
-extern "C" void download_magnet(const char* magnet, const char* save_path);
+extern "C" BittorrentClient* create_client();
+extern "C" void set_client_options(BittorrentClient* client, const lt_ffi::lt_settings* opts);
+extern "C" void print_status(BittorrentClient* client);
+extern "C" bool is_finished(BittorrentClient* client);
+extern "C" lt_ffi::file_list* add_torrent(BittorrentClient* client, const char* magnet, const char* save_path);
 
-lt::session setup_client();
-void print_status(lt::torrent_handle handle);
-
+extern "C" void free_file_list(lt_ffi::file_list* files);

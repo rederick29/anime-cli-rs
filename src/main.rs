@@ -1,6 +1,6 @@
 use clap::Parser;
 use scraper::{Html, Selector};
-use std::path::PathBuf;
+use std::{ffi::{c_char, CStr, CString}, net::Ipv4Addr, path::{Path, PathBuf}};
 
 // CLI options
 #[derive(Debug, Parser)]
@@ -14,29 +14,134 @@ struct Args {
     #[clap(short = 'p', long, value_name = "video player", default_value = "mpv")]
     player: PathBuf,
 
-    /// Username of user to filter results by. None by default.
+    /// Username of user to filter results by.
     #[clap(short = 'u', long, value_name = "uploader")]
     user: Option<String>,
 
     /// Nyaa.si filter to use when searching.
-    #[clap(value_enum, default_value_t = Default::default())]
+    #[clap(short = 'f', long, value_enum, default_value_t = Default::default())]
     filter: NyaaFilter,
 
-    /// Path to use for temporary file saving while streaming. /tmp/ by default.
+    /// Nyaa.si category to use when searching.
+    #[clap(short = 'c', long, value_enum, default_value_t = Default::default())]
+    category: NyaaCategory,
+
+    /// Path to use for temporary file saving while streaming.
     #[clap(long)]
     save_path: Option<PathBuf>,
+
+    /// Maximum peer connections
+    #[clap(long, default_value = "100")]
+    connection_limit: u16,
+
+    // Enable uTP connections
+    #[clap(long)]
+    enable_utp: bool,
+
+    // Enable torrent encryption
+    #[clap(long, default_value = "true")]
+    enable_encryption: bool,
+
+    // Force torrent encryption
+    #[clap(long)]
+    force_encryption: bool,
+
+    // IP addresses to bind libtorrent to
+    #[clap(long, default_values = ["0.0.0.0"])]
+    interfaces: Vec<Ipv4Addr>,
+
+    // Torrent port
+    #[clap(long, default_value = "6881")]
+    port: u16,
+}
+
+#[repr(C)]
+pub struct LtSettings {
+    connection_limit: u16,
+    enable_utp: bool,
+    enable_encryption: bool,
+    force_encryption: bool,
+    interfaces: *const c_char,
+}
+
+#[repr(C)]
+pub struct TorrentFile {
+    size: i64,
+    offset: i64,
+    priority: usize,
+    path: *const c_char,
+}
+
+#[repr(C)]
+pub struct TorrentFileList {
+    count: usize,
+    files: *mut *mut TorrentFile,
+}
+impl TorrentFileList {
+    pub fn as_slice(&self) -> &[(i64, i64, usize, &str)] {
+        unsafe {
+            if self.count == 0 || self.files.is_null() {
+                &[]
+            } else {
+                let paths = std::slice::from_raw_parts(self.files, self.count);
+
+                paths
+                    .iter()
+                    .map(|&f| {
+                        ((*f).size, (*f).offset, (*f).priority, CStr::from_ptr((*f).path).to_str().expect("invalid utf8 filepath"))
+                    })
+                    .collect::<Vec<_>>()
+                    .leak()
+            }
+        }
+    }
+}
+
+#[repr(C)]
+pub struct BittorrentClient { _private: [u8; 0] }
+impl BittorrentClient {
+    pub fn new() -> *mut Self { unsafe { create_client() } }
+
+    pub fn set_options(&mut self, opts: &LtSettings) {
+        unsafe { set_client_options(self as *mut Self, opts); }
+    }
+
+    pub fn add_torrent(&mut self, entry: NyaaEntry, save_path: &Path) -> *mut TorrentFileList {
+        let link_cstring = CString::new(&entry.magnet[..])
+            .expect("could not make cstring from magnet link");
+        let save_path = CString::new(save_path.to_str().unwrap())
+            .expect("could not make cstring from temporary save path");
+
+        unsafe { add_torrent(self as *mut Self, link_cstring.as_ptr(), save_path.as_ptr())}
+    }
+
+    pub fn is_finished(&mut self) -> bool {
+        unsafe { is_finished(self as *mut Self) }
+    }
+
+    pub fn print_status(&mut self) {
+        unsafe { print_status(self as *mut Self); }
+    }
 }
 
 extern "C" {
-    pub fn download_magnet(magnet: *const std::os::raw::c_char, path: *const std::os::raw::c_char);
+    pub fn create_client() -> *mut BittorrentClient;
+    pub fn set_client_options(client: *mut BittorrentClient, opts: *const LtSettings);
+    pub fn is_finished(client: *mut BittorrentClient) -> bool;
+    pub fn free_file_list(files: *mut TorrentFileList);
+}
+
+extern "C-unwind" {
+    pub fn add_torrent(client: *mut BittorrentClient, magnet: *const c_char, save_path: *const c_char) -> *mut TorrentFileList;
+    pub fn print_status(client: *mut BittorrentClient);
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 /// The 3 possible filters on Nyaa.si website
 enum NyaaFilter {
-    NoFilter,
-    NoRemakes,
-    TrustedOnly,
+    NoFilter = 0,
+    NoRemakes = 1,
+    TrustedOnly = 2,
 }
 
 impl Default for NyaaFilter {
@@ -47,14 +152,34 @@ impl Default for NyaaFilter {
 
 impl std::fmt::Display for NyaaFilter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let filter = match self {
-            NyaaFilter::NoFilter => 0,
-            NyaaFilter::NoRemakes => 1,
-            NyaaFilter::TrustedOnly => 2,
-        };
-        f.write_fmt(format_args!("{}", filter))
+        f.write_fmt(format_args!("{}", *self as u8))
             .expect("failed to write NyaaFilter value");
         Ok(())
+    }
+}
+
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+/// Nyaa anime categories
+enum NyaaCategory {
+    All = 0,
+    Amv = 1,
+    EnglishTranslated = 2,
+    NonEnglishTranslated = 3,
+    Raw = 4,
+}
+
+impl std::fmt::Display for NyaaCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}", *self as u8))
+            .expect("failed to write NyaaCategory value");
+        Ok(())
+    }
+}
+
+impl Default for NyaaCategory {
+    fn default() -> Self {
+        Self::EnglishTranslated
     }
 }
 
@@ -90,39 +215,45 @@ impl std::fmt::Display for NyaaEntry {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Prepare variables
-    let search_query = get_search_string();
-    let player_path = Args::parse().player;
-    let nyaa_filter = Args::parse().filter;
+    let args = Args::parse();
     let save_path = get_save_path();
+    let mut interfaces = args.interfaces.iter().map(|ip| format!("{}:{},", ip, args.port)).collect::<String>();
+    if interfaces.ends_with(',') { interfaces.pop(); };
+    let interfaces = CString::new(interfaces).expect("could not create cstring");
+    let lt_settings = LtSettings {
+        connection_limit: args.connection_limit,
+        enable_utp: args.enable_utp,
+        enable_encryption: args.enable_encryption,
+        force_encryption: args.force_encryption,
+        interfaces: interfaces.as_ptr(),
+    };
 
     // Gather first page of results for user query into vector
     // If query is left empty, latest uploads will be gathered
-    let results = search(search_query, nyaa_filter, Args::parse().user);
+    let results = search(get_search_string(), args.filter, args.category, args.user);
 
     // Entry chooser UI, returns user pick
     let choice = user_choose(results).unwrap();
 
-    // Get expected file path of video ahead of download
-    let file_name = get_file_name(&choice);
-    let file_path: PathBuf = save_path.join(file_name);
+    // Start torrent client
+    let torrent = BittorrentClient::new();
+    let torrent = unsafe { torrent.as_mut().expect("failed to start libtorrent") };
+    torrent.set_options(&lt_settings);
 
-    // TODO: download_entry() in new thread while checking for video file
-    // in main thread and opening video player while downloading.
-    // Download chosen entry
-    //let handle = std::thread::spawn(|| {
-    //    unsafe { download_entry(choice, save_path); }
-    //});
-    //while !file_path.exists() {
-    //   std::thread::sleep(std::time::Duration::from_secs(2));
-    //}
+    // Start downloading
+    let files = unsafe { torrent.add_torrent(choice, &save_path).as_mut().expect("invalid file list") };
+    let (size, offset, priority, highest_priority) = files.as_slice().iter().min_by(|a, b| a.2.cmp(&b.2)).unwrap();
+    let file_path = highest_priority.to_string();
 
-    unsafe {
-        download_entry(choice, save_path);
+    println!("Saving: {file_path}\nsize: {size}, offset: {offset}, priority: {priority}");
+    unsafe { free_file_list(files); }
+
+    while !torrent.is_finished() {
+        torrent.print_status();
+        std::thread::sleep(std::time::Duration::from_secs(2));
     }
 
-    std::thread::sleep(std::time::Duration::from_secs(2));
-    open_video_player(file_path, player_path).expect("could not play video");
-
+    open_video_player(save_path.join(file_path), args.player).expect("could not play video");
     Ok(())
 }
 
@@ -132,14 +263,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// an empty string, then the latest uploads are gathered.
 /// When `user` is `None`, uploads by all users will be searched. Otherwise, only uploads by `user`
 /// are gathered.
-/// This function only searches in the 1_2 category, which is -Anime - English-translated.
-fn search(query: String, filter: NyaaFilter, user: Option<String>) -> Vec<NyaaEntry> {
+fn search(query: String, filter: NyaaFilter, category: NyaaCategory, user: Option<String>) -> Vec<NyaaEntry> {
     let search_url = match user {
-        Some(user) => format!(
-            "https://nyaa.si/user/{}?f={}&c=1_2&q={}",
-            user, filter, query
-        ),
-        None => format!("https://nyaa.si/?q={}&f={}&c=1_2", query, filter),
+        Some(user) => format!("https://nyaa.si/user/{user}?f={filter}&c=1_{category}&q={query}"),
+        None => format!("https://nyaa.si/?q={query}&f={filter}&c=1_{category}"),
     };
 
     // Attempt to request html page
@@ -294,7 +421,7 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
                     (entry.0) + 1,
                     entry.1.name,
                     entry.1.seeders,
-                    bytesize::ByteSize(entry.1.size).to_string_as(false)
+                    bytesize::ByteSize(entry.1.size)
                 );
             }
         } else {
@@ -305,7 +432,7 @@ fn user_choose(entries: Vec<NyaaEntry>) -> Result<NyaaEntry, &'static str> {
                     (entry.0) + 1,
                     entry.1.name,
                     entry.1.seeders,
-                    bytesize::ByteSize(entry.1.size).to_string_as(false)
+                    bytesize::ByteSize(entry.1.size)
                 );
             }
         }
@@ -408,53 +535,11 @@ fn get_save_path() -> PathBuf {
         }
         None => {
             if !default_path.exists() {
-                std::fs::create_dir(&default_path).expect("could not create default save dir");
+                std::fs::create_dir(default_path).expect("could not create default save dir");
             }
             default_path.to_path_buf()
         }
     }
-}
-
-/// Find the file name of the first file in the [`NyaaEntry`]
-///
-/// This is achieved by scraping the webpage of the entry on Nyaa.si
-fn get_file_name(entry: &NyaaEntry) -> String {
-    let entry_url = format!("https://nyaa.si/view/{}", entry.id);
-
-    let response = reqwest::blocking::get(entry_url).expect("failed to get response from URL");
-
-    // 200 is HTTP status for OK
-    if response.status() != 200 {
-        panic!("nyaa server is not OK to be scraped")
-    }
-
-    let page = Html::parse_document(&response.text().expect("failed to decode response to UTF-8"));
-
-    let file_selector = Selector::parse("ul>li>i").unwrap(); // fa-file does not work
-
-    page.select(&file_selector)
-        .next().expect("could not select file name from entry webpage")
-        .next_sibling().expect("could not get sibling of fa-file")
-        .value()
-        .as_text()
-        .expect("file name from webpage is empty")
-        .trim_end()
-        .to_string()
-}
-
-/// Try to download the given [`NyaaEntry`] in a directory `save_path`
-///
-/// This will launch a libtorrent session, which is an `unsafe` library
-unsafe fn download_entry(entry: NyaaEntry, save_path: PathBuf) {
-    // Convert magnet URI to CString for use in ffi
-    let link_cstring = std::ffi::CString::new(&entry.magnet[..])
-        .expect("could not make cstring from magnet link");
-    // Convert temp save path to use in ffi
-    let save_path = std::ffi::CString::new(save_path.to_str().unwrap())
-        .expect("could not make cstring from temporary save path");
-
-    // Use c++ ffi to download using libtorrent
-    download_magnet(link_cstring.as_ptr(), save_path.as_ptr()); // unsafe
 }
 
 fn open_video_player(file_path: PathBuf, player_path: PathBuf) -> Result<(), &'static str> {
@@ -469,7 +554,9 @@ fn open_video_player(file_path: PathBuf, player_path: PathBuf) -> Result<(), &'s
         std::process::Command::new(&player_path)
             .arg(file_path)
             .spawn()
-            .expect("failed to open video player");
+            .expect("failed to open video player")
+            .wait()
+            .expect("player did not run");
         Ok(())
     } else {
         Err("file extension is not mkv. Aborting...")
